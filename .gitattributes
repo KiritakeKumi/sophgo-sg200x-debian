@@ -1,0 +1,7 @@
+# Always use LF line endings, regardless of the platform the repository is checked out on.
+# The scripts, Makefile and patches are copied into a Linux container, where CRLF breaks them.
+* text=auto eol=lf
+*.sh text eol=lf
+*.patch text eol=lf
+Makefile text eol=lf
+*.mk text eol=lf
