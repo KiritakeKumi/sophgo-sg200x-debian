@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kiritake Kumi <root@niconiconi.us>
+Date: Mon, 19 Oct 2026 22:29:53 +0800
+Subject: [PATCH] aic8800: use the generic Linux platform and the project's
+ firmware path
+
+Use the vendor tree's own aicsemi/aic8800 driver and only adapt two things:
+- firmware path: /lib/firmware/aic8800_sdio/aic8800, where the aic8800-firmware
+  addon installs it (the vendor default is /vendor/etc/firmware)
+- platform: the generic Linux (UBUNTU) code path, as before, instead of the
+  CVITEK one, which needs cvi_get_wifi_pwr_on_gpio() from the vendor-only
+  CVI_WIFI_PIN driver (modpost fails with an undefined symbol otherwise)
+
+diff --git a/drivers/net/wireless/aicsemi/aic8800/Kconfig b/drivers/net/wireless/aicsemi/aic8800/Kconfig
+index 08af5824f..76a099180 100644
+--- a/drivers/net/wireless/aicsemi/aic8800/Kconfig
++++ b/drivers/net/wireless/aicsemi/aic8800/Kconfig
+@@ -7,8 +7,7 @@ config AIC8800
+ config AIC_FW_PATH
+ 	depends on AIC8800
+ 	string "Firmware & config file path"
+-	default "/vendor/etc/firmware"
+-	#default "/lib/firmware/aic8800_sdio"
++	default "/lib/firmware/aic8800_sdio/aic8800"
+ 	help
+ 	  Path to the firmware & config file.
+ 
+diff --git a/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/Makefile b/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/Makefile
+index fdde9e63b..e104f5620 100644
+--- a/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/Makefile
++++ b/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/Makefile
+@@ -1,7 +1,7 @@
+ CONFIG_SDIO_SUPPORT := y
+ CONFIG_SDIO_PWRCTRL := y
+-CONFIG_AIC_FW_PATH = "/vendor/etc/firmware"
+-#CONFIG_AIC_FW_PATH = "/lib/firmware/aic8800"
++#CONFIG_AIC_FW_PATH = "/vendor/etc/firmware"
++CONFIG_AIC_FW_PATH ?= "/lib/firmware/aic8800_sdio/aic8800"
+ export CONFIG_AIC_FW_PATH
+ ccflags-y += -DCONFIG_AIC_FW_PATH=\"$(CONFIG_AIC_FW_PATH)\"
+ 
+@@ -70,8 +70,8 @@ CONFIG_PLATFORM_ROCKCHIP2 ?= n
+ CONFIG_PLATFORM_ALLWINNER ?=n
+ CONFIG_PLATFORM_INGENIC_T20 ?= n
+ CONFIG_PLATFORM_AMLOGIC ?= n
+-CONFIG_PLATFORM_UBUNTU ?= n
+-CONFIG_PLATFORM_CVITEK ?= y
++CONFIG_PLATFORM_UBUNTU ?= y
++CONFIG_PLATFORM_CVITEK ?= n
+ 
+ ifeq ($(CONFIG_PLATFORM_ROCKCHIP), y)
+ ccflags-$(CONFIG_PLATFORM_ROCKCHIP) += -DCONFIG_PLATFORM_ROCKCHIP
+diff --git a/drivers/net/wireless/aicsemi/aic8800/aic8800_fdrv/Makefile b/drivers/net/wireless/aicsemi/aic8800/aic8800_fdrv/Makefile
+index e38c88796..df04ee8f6 100644
+--- a/drivers/net/wireless/aicsemi/aic8800/aic8800_fdrv/Makefile
++++ b/drivers/net/wireless/aicsemi/aic8800/aic8800_fdrv/Makefile
+@@ -311,8 +311,8 @@ CONFIG_PLATFORM_ROCKCHIP2 ?= n
+ CONFIG_PLATFORM_ALLWINNER ?= n
+ CONFIG_PLATFORM_INGENIC_T20 ?= n
+ CONFIG_PLATFORM_AMLOGIC ?= n
+-CONFIG_PLATFORM_UBUNTU ?= n
+-CONFIG_PLATFORM_CVITEK ?= y
++CONFIG_PLATFORM_UBUNTU ?= y
++CONFIG_PLATFORM_CVITEK ?= n
+ 
+ ifeq ($(CONFIG_PLATFORM_ROCKCHIP), y)
+ ARCH := arm64
+-- 
+-
+
