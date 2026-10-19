@@ -5,6 +5,7 @@ set -ex
 BOARD=$(cat /tmp/install/board)
 HOSTNAME=$(cat /tmp/install/hostname)
 STORAGETYPE=$(cat /tmp/install/storage)
+SUITE=$(cat /tmp/install/suite)
 
 
 export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true
@@ -142,13 +143,24 @@ fi
 
 # Update source list 
 
-rm -rf /etc/apt/sources.list.d/multistrap-debian.list
+# mmdebstrap may have written its own (possibly deb822) sources, drop them so entries aren't duplicated
+rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
 
-apt-key add /tmp/install/public-key.asc
+# apt-key is gone in APT 3.0 (Debian 13), so use a signed-by keyring instead
+mkdir -p /etc/apt/keyrings
+cp /tmp/install/public-key.asc /etc/apt/keyrings/sophgo.asc
 
 cat > /etc/apt/sources.list <<EOF
-deb http://deb.debian.org/debian sid main non-free-firmware
-deb https://sophgo.my-ho.st:8443/ debian sophgo
+deb http://deb.debian.org/debian ${SUITE} main non-free-firmware
+EOF
+if [ "$SUITE" != "sid" ] && [ "$SUITE" != "unstable" ]; then
+  cat >> /etc/apt/sources.list <<EOF
+deb http://deb.debian.org/debian ${SUITE}-updates main non-free-firmware
+deb http://deb.debian.org/debian-security ${SUITE}-security main non-free-firmware
+EOF
+fi
+cat >> /etc/apt/sources.list <<EOF
+deb [signed-by=/etc/apt/keyrings/sophgo.asc] https://sophgo.my-ho.st:8443/ debian sophgo
 EOF
 
 echo "/boot/uboot.env	0x0000          0x20000" > /etc/fw_env.config

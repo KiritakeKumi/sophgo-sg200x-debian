@@ -1,25 +1,23 @@
-From 172cb98bcae844f747b5ef41f05cc6073fa464b4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Justin Hammond <justin@dynam.ac>
-Date: Sat, 6 Apr 2024 14:30:10 +0800
-Subject: [PATCH 3/4] Add Remoteproc Driver for cvitek
+Date: Mon, 19 Oct 2026 20:02:56 +0800
+Subject: [PATCH] Add Remoteproc Driver for cvitek
 
----
- drivers/remoteproc/Kconfig             |  10 +
- drivers/remoteproc/Makefile            |   1 +
- drivers/remoteproc/cvitek_remoteproc.c | 424 +++++++++++++++++++++++++
- 3 files changed, 435 insertions(+)
- create mode 100644 drivers/remoteproc/cvitek_remoteproc.c
+The vendor tree now ships its own CVITEK_REMOTEPROC (sg_cv18xx_remoteproc,
+SBI reset based). Keep this mailbox/reset based driver, which the board
+device trees use (cvitek,cv181x-c906_1), under its own Kconfig symbol
+CVITEK_SG200X_REMOTEPROC so the two do not clash.
 
 diff --git a/drivers/remoteproc/Kconfig b/drivers/remoteproc/Kconfig
-index d99548fb5dde..0bb9fcbde9d0 100644
+index 40798e206..a003398e6 100644
 --- a/drivers/remoteproc/Kconfig
 +++ b/drivers/remoteproc/Kconfig
-@@ -247,6 +247,16 @@ config ST_REMOTEPROC
- config ST_SLIM_REMOTEPROC
- 	tristate
+@@ -296,6 +296,16 @@ config CVITEK_REMOTEPROC
+ 		processor framework.
+ 		This can be either built-in or a loadable module.
  
-+config CVITEK_REMOTEPROC
-+	tristate "CVITEK remoteproc support"
++config CVITEK_SG200X_REMOTEPROC
++	tristate "CVITEK SG200X remoteproc support (mailbox based)"
 +	depends on ARCH_CVITEK
 +	select MAILBOX
 +	select CVITEK_MAILBOX
@@ -28,21 +26,21 @@ index d99548fb5dde..0bb9fcbde9d0 100644
 +	  processor framework.
 +	  This can be either built-in or a loadable module.
 +
- config STM32_RPROC
- 	tristate "STM32 remoteproc support"
- 	depends on ARCH_STM32
+ endif # REMOTEPROC
+ 
+ endmenu
 diff --git a/drivers/remoteproc/Makefile b/drivers/remoteproc/Makefile
-index da2ace4ec86c..047fbfa8b72d 100644
+index 3efdb489b..a92559414 100644
 --- a/drivers/remoteproc/Makefile
 +++ b/drivers/remoteproc/Makefile
-@@ -34,3 +34,4 @@ obj-$(CONFIG_ST_SLIM_REMOTEPROC)	+= st_slim_rproc.o
- obj-$(CONFIG_STM32_RPROC)		+= stm32_rproc.o
+@@ -35,3 +35,4 @@ obj-$(CONFIG_STM32_RPROC)		+= stm32_rproc.o
  obj-$(CONFIG_TI_K3_DSP_REMOTEPROC)	+= ti_k3_dsp_remoteproc.o
  obj-$(CONFIG_TI_K3_R5_REMOTEPROC)	+= ti_k3_r5_remoteproc.o
-+obj-$(CONFIG_CVITEK_REMOTEPROC) 	+= cvitek_remoteproc.o
+ obj-$(CONFIG_CVITEK_REMOTEPROC)    += sg_cv18xx_remoteproc.o
++obj-$(CONFIG_CVITEK_SG200X_REMOTEPROC)	+= cvitek_remoteproc.o
 diff --git a/drivers/remoteproc/cvitek_remoteproc.c b/drivers/remoteproc/cvitek_remoteproc.c
 new file mode 100644
-index 000000000000..64e0ce21d711
+index 000000000..e6428069b
 --- /dev/null
 +++ b/drivers/remoteproc/cvitek_remoteproc.c
 @@ -0,0 +1,424 @@
@@ -471,5 +469,5 @@ index 000000000000..64e0ce21d711
 +MODULE_AUTHOR("Justin Hammond <justin@dynam.ac>");
 +MODULE_LICENSE("GPL v2");
 -- 
-2.44.0
+-
 

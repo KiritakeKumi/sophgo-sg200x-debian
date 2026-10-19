@@ -1,5 +1,5 @@
 # Debian Images for Sophgo cv181x/sg200x based boards 
-This repository builds debian sid images for Sophgo cv181x/sg200x based boards such as MilkV Duo256/DuoS and Sipeed LicheeRvNano.
+This repository builds Debian 13 (trixie) images for Sophgo cv181x/sg200x based boards such as MilkV Duo256/DuoS and Sipeed LicheeRvNano.
 
 (Note, we don't support the MilkV Duo, as it does not have enough ram to run Debian)
 

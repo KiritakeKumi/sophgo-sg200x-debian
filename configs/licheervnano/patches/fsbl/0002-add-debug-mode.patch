@@ -1,19 +1,17 @@
-From 0e02a58c09c8f520838e372578b14d979a737d18 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Justin Hammond <Justin@dynam.ac>
-Date: Thu, 18 Apr 2024 13:38:27 +0000
+Date: Mon, 19 Oct 2026 20:11:06 +0800
 Subject: [PATCH] add debug mode
 
----
- plat/sg200x/bl2/bl2_opt.c | 15 +++++++++++++++
- 1 file changed, 15 insertions(+)
+Port of the LicheeRV Nano debug mode patch from plat/sg200x to plat/cv181x.
 
-diff --git a/plat/sg200x/bl2/bl2_opt.c b/plat/sg200x/bl2/bl2_opt.c
-index c73fa55..013d5de 100644
---- a/plat/sg200x/bl2/bl2_opt.c
-+++ b/plat/sg200x/bl2/bl2_opt.c
-@@ -419,6 +419,21 @@ retry_from_flash:
- 
- 	switch_rtc_mode_2nd_stage();
+diff --git a/plat/cv181x/bl2/bl2_opt.c b/plat/cv181x/bl2/bl2_opt.c
+index ccf55a2..5a341c2 100644
+--- a/plat/cv181x/bl2/bl2_opt.c
++++ b/plat/cv181x/bl2/bl2_opt.c
+@@ -566,6 +566,20 @@ retry_from_flash:
+ 	monitor_entry = run_addr;
+ #endif
  
 +	if (!(mmio_read_32(GPIO_BASE + 0x050) & (1 << 30))) {
 +		NOTICE("=========================================\n");
@@ -29,10 +27,9 @@ index c73fa55..013d5de 100644
 +			;
 +	}
 +
-+
  	if (monitor_entry) {
  		NOTICE("Jump to monitor at 0x%lx.\n", monitor_entry);
  		jump_to_monitor(monitor_entry, loader_2nd_entry);
 -- 
-2.43.0
+-
 

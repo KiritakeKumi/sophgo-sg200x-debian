@@ -21,6 +21,9 @@ else
 $(error $(red)Board $(BOARD) not supported$(reset))
 endif
 
+# CHIP selects the device trees; the fsbl source tree is organised per SoC family instead
+FSBL_CHIP ?= $(CHIP)
+
 include $(wildcard /builder/addons/*/addon.mk)
 
 addon-targets = $(patsubst "%,$(BUILDDIR)/%-stamp,$(patsubst %",%,$(IMAGE_ADDITIONS)))
@@ -28,18 +31,34 @@ _PACKAGES = $(patsubst "%,%,$(patsubst %",%,$(PACKAGES)))
 
 
 $(info $(blue)Board: $(BOARD)$(reset))
+$(info $(blue)Debian Suite: $(DEBIAN_SUITE)$(reset))
 $(info $(blue)Storage: $(STORAGE_TYPE)$(reset))
 $(info $(blue)Image Addons: $(IMAGE_ADDITIONS)$(reset))
 $(info $(blue)Packages: $(_PACKAGES)$(reset))
 
 NPROCS := $(shell nproc)
 
+# Pinned upstream revisions. They are fetched by exact commit (a shallow clone of the
+# branch only contains its tip, so checking out an older commit from it fails once the
+# branch moves on). usage: $(call git_checkout,<url>,<dir>,<full sha>)
+KERNEL_REPO := https://github.com/sophgo/linux_5.10.git
+KERNEL_COMMIT := ae7d7584767ff77fc62b095e9cdc66720f3a6aaa
+UBOOT_REPO := https://github.com/sophgo/u-boot-2021.10.git
+UBOOT_COMMIT := e16efa66be32c23c366f861cef1052775bf7be62
+OPENSBI_REPO := https://github.com/sophgo/opensbi.git
+OPENSBI_COMMIT := 6766e9cc96df51cde91540f9a15f291bf843b682
+FSBL_REPO := https://github.com/sophgo/fsbl.git
+FSBL_COMMIT := 952dcb6903efc7b5d266bc9d51dc3a2ab54022eb
+
+define git_checkout
+	rm -rf $(2) && mkdir -p $(2) && cd $(2) && git init -q && git remote add origin $(1) && git fetch -q --depth 1 origin $(3) && git checkout -q FETCH_HEAD
+endef
+
 
 $(BUILDDIR)/linux-prepare-checkout-stamp:
 	@echo "$(COLOUR_GREEN)Checking out Kernel for $(BOARD)$(END_COLOUR)"
 	@mkdir -p $(BUILDDIR)
-	@git clone -b sg200x-dev --depth 7 https://github.com/sophgo/linux_5.10.git /build/kernel
-	@cd $(BUILDDIR)/kernel && git checkout 8b8fbf8
+	@$(call git_checkout,$(KERNEL_REPO),$(BUILDDIR)/kernel,$(KERNEL_COMMIT))
 	@touch $@
 
 $(BUILDDIR)/linux-prepare-patch-stamp: $(BUILDDIR)/linux-prepare-checkout-stamp
@@ -79,8 +98,7 @@ linux-clean:
 $(BUILDDIR)/uboot-prepare-checkout-stamp:
 	@echo "$(COLOUR_GREEN)Checking out U-Boot for $(BOARD)$(END_COLOUR)"
 	@mkdir -p $(BUILDDIR)
-	@git clone --depth 1 https://github.com/sophgo/u-boot-2021.10.git $(BUILDDIR)/u-boot
-	@cd $(BUILDDIR)/u-boot && git checkout 4a21b6b
+	@$(call git_checkout,$(UBOOT_REPO),$(BUILDDIR)/u-boot,$(UBOOT_COMMIT))
 	@touch $@
 
 $(BUILDDIR)/uboot-prepare-patch-stamp: $(BUILDDIR)/uboot-prepare-checkout-stamp
@@ -122,8 +140,7 @@ uboot-clean:
 $(BUILDDIR)/opensbi-prepare-checkout-stamp:
 	@echo "$(COLOUR_GREEN)Checking out OpenSBI for $(BOARD)$(END_COLOUR)"
 	@mkdir -p $(BUILDDIR)
-	@git clone -b sg200x-dev --depth 4 https://github.com/sophgo/opensbi.git $(BUILDDIR)/opensbi
-	@cd $(BUILDDIR)/opensbi && git checkout 216793f
+	@$(call git_checkout,$(OPENSBI_REPO),$(BUILDDIR)/opensbi,$(OPENSBI_COMMIT))
 #	git clone https://github.com/riscv-software-src/opensbi.git $(BUILDDIR)/opensbi
 #	@cd $(BUILDDIR)/opensbi && git checkout a2b255b
 	@touch $@
@@ -137,7 +154,7 @@ $(BUILDDIR)/opensbi-prepare-patch-stamp: $(BUILDDIR)/opensbi-prepare-checkout-st
 
 $(BUILDDIR)/opensbi-compile-stamp: $(BUILDDIR)/opensbi-prepare-patch-stamp $(BUILDDIR)/uboot-compile-stamp
 	@echo "$(COLOUR_GREEN)Building OpenSBI for $(BOARD)$(END_COLOUR)"
-	@cd $(BUILDDIR)/opensbi && CROSS_COMPILE="/host-tools/gcc/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-" make PLATFORM=generic FW_FDT_PATH=$(BUILDDIR)/u-boot.dtb
+	@cd $(BUILDDIR)/opensbi && CROSS_COMPILE="/host-tools/gcc/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-" make PLATFORM=generic FW_FDT_PATH=$(BUILDDIR)/u-boot.dtb CHIP_ARCH=$(OPENSBI_CHIP_ARCH) OPENSBI_PATH=$(BUILDDIR)/opensbi
 	@cp $(BUILDDIR)/opensbi/build/platform/generic/firmware/fw_dynamic.bin $(BUILDDIR) 
 	@touch $@
 
@@ -151,23 +168,22 @@ opensbi-clean:
 $(BUILDDIR)/fsbl-prepare-checkout-stamp:
 	@echo "$(COLOUR_GREEN)Checking out FSBL for $(BOARD)$(END_COLOUR)"
 	@mkdir -p $(BUILDDIR)
-	@git clone -b sg200x-dev --depth 1 https://github.com/sophgo/fsbl.git $(BUILDDIR)/fsbl
-	@cd $(BUILDDIR)/fsbl && git checkout 15a84c5
+	@$(call git_checkout,$(FSBL_REPO),$(BUILDDIR)/fsbl,$(FSBL_COMMIT))
 	@touch $@
 
 $(BUILDDIR)/fsbl-prepare-patch-stamp: $(BUILDDIR)/fsbl-prepare-checkout-stamp
 	@echo "$(COLOUR_GREEN)Patching FSBL for $(BOARD)$(END_COLOUR)"
 	@$(foreach file, $(wildcard /configs/common/patches/fsbl/*.patch), cd $(BUILDDIR)/fsbl && git apply --ignore-whitespace $(file);)
 	@$(foreach file, $(wildcard /configs/$(BOARD)/patches/fsbl/*.patch), cd $(BUILDDIR)/fsbl && git apply --ignore-whitespace $(file);)
-	@python3 /builder/python/mmap_conv.py --type h /configs/$(BOARD)/memmap.py $(BUILDDIR)/fsbl/plat/$(CHIP)/include/cvi_board_memmap.h
+	@python3 /builder/python/mmap_conv.py --type h /configs/$(BOARD)/memmap.py $(BUILDDIR)/fsbl/plat/$(FSBL_CHIP)/include/cvi_board_memmap.h
 	@printf '\163\000\120\020\157\360\337\377' > $(BUILDDIR)/fsbl/blank.bin
 	@touch $@
 
 $(BUILDDIR)/fsbl-compile-stamp: $(BUILDDIR)/fsbl-prepare-patch-stamp $(BUILDDIR)/opensbi-compile-stamp $(BUILDDIR)/uboot-compile-stamp
 	@echo "$(COLOUR_GREEN)Building FSBL for $(BOARD)$(END_COLOUR)"
-	@cd $(BUILDDIR)/fsbl && OD_CLK_SEL=y $(MAKE) -j$(NPROCS) ARCH=$(ARCH) CHIP_ARCH=$(CHIP) BOOT_CPU=$(BOOT_CPU) DDR_CFG=$(DDR_CFG) RTOS_ENABLE_FREERTOS=y BLCP_2ND_PATH=$(BUILDDIR)/fsbl/blank.bin LOADER_2ND_PATH=$(BUILDDIR)/u-boot.bin \
+	@cd $(BUILDDIR)/fsbl && OD_CLK_SEL=y $(MAKE) -j$(NPROCS) ARCH=$(ARCH) CHIP_ARCH=$(FSBL_CHIP) BOOT_CPU=$(BOOT_CPU) DDR_CFG=$(DDR_CFG) RTOS_ENABLE_FREERTOS=y BLCP_2ND_PATH=$(BUILDDIR)/fsbl/blank.bin LOADER_2ND_PATH=$(BUILDDIR)/u-boot.bin \
     CROSS_COMPILE=/host-tools/gcc/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl- 
-	@cp $(BUILDDIR)/fsbl/build/$(CHIP)/fip.bin $(BUILDDIR)
+	@cp $(BUILDDIR)/fsbl/build/$(FSBL_CHIP)/fip.bin $(BUILDDIR)
 	@touch $@
 
 $(BUILDDIR)/fsbl-package-stamp: $(BUILDDIR)/fsbl-compile-stamp
@@ -198,8 +214,11 @@ $(BUILDDIR)/image-prepare-stamp:
 	@-rm $(addon-targets)
 	@mkdir -p /rootfs/
 	@curl -v -L https://sophgo.my-ho.st:8443/public-key.asc -o $(BUILDDIR)/public-key.asc
-	@apt-key add $(BUILDDIR)/public-key.asc
-	@mmdebstrap -v --architectures=riscv64 --include="$(_PACKAGES)" sid "/rootfs/" "deb http://deb.debian.org/debian/ sid main" "deb https://sophgo.my-ho.st:8443/ debian sophgo"
+	@mkdir -p /etc/apt/keyrings
+	@cp $(BUILDDIR)/public-key.asc /etc/apt/keyrings/sophgo.asc
+	@mmdebstrap -v --architectures=riscv64 --include="$(_PACKAGES)" \
+		--setup-hook='mkdir -p "$$1/etc/apt/keyrings" && cp /etc/apt/keyrings/sophgo.asc "$$1/etc/apt/keyrings/sophgo.asc"' \
+		$(DEBIAN_SUITE) "/rootfs/" "deb http://deb.debian.org/debian/ $(DEBIAN_SUITE) main" "deb [signed-by=/etc/apt/keyrings/sophgo.asc] https://sophgo.my-ho.st:8443/ debian sophgo"
 	@touch $@
 
 $(BUILDDIR)/image-addons-stamp: $(BUILDDIR)/image-prepare-stamp $(BUILDDIR)/fsbl-package-stamp $(BUILDDIR)/linux-compile-stamp $(addon-targets)
@@ -217,6 +236,7 @@ $(BUILDDIR)/image-customize-stamp: $(BUILDDIR)/image-addons-stamp $(BUILDDIR)/li
 	@echo $(BOARD) > /rootfs/tmp/install/hostname
 	@echo $(BOARD) > /rootfs/tmp/install/board
 	@echo $(STORAGE_TYPE) > /rootfs/tmp/install/storage
+	@echo $(DEBIAN_SUITE) > /rootfs/tmp/install/suite
 	@cp -v /usr/bin/qemu-riscv64-static /rootfs/tmp/install/
 	@cp -v /builder/setup_rootfs.sh /rootfs/tmp/install/
 	@cp -v $(BUILDDIR)/public-key.asc /rootfs/tmp/install/

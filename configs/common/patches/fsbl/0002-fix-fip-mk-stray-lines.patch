@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kiritake Kumi <root@niconiconi.us>
+Date: Mon, 19 Oct 2026 20:11:06 +0800
+Subject: [PATCH] fip.mk: drop stray duplicated lines in fip-all
+
+The leftover tab indented '--compress=...' line and the duplicate [LS] echo
+are executed by make as shell commands and abort fip.bin generation.
+
+diff --git a/make_helpers/fip.mk b/make_helpers/fip.mk
+index ba2c850..ac0229a 100644
+--- a/make_helpers/fip.mk
++++ b/make_helpers/fip.mk
+@@ -112,8 +112,6 @@ fip-all: fip-dep
+ 		--compress='${FIP_COMPRESS}'\
+ 		--LOADER_2ND_B='${LOADER_2ND_PATH_B}'
+ 	${Q}echo "  [LS] " $$(ls -l '${BUILD_PLAT}/fip.bin')
+-		--compress='${FIP_COMPRESS}'
+-	${Q}echo "  [LS] " $$(ls -l '${BUILD_PLAT}/fip.bin')
+ 
+ ifeq (${FSBL_SECURE_BOOT_SUPPORT},1)
+ .PHONY: fip-sign fip-sign-enc boot0-sign boot0-sign-enc
+-- 
+-
+
