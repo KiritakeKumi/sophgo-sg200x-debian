@@ -97,6 +97,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
           options: --privileged -v ${{ github.workspace }}/images/:/output -v ${{ github.workspace }}/configs/:/configs/
           run: |
+            set -e
             make BOARD=${{ matrix.boards }} STORAGE_TYPE=${{ matrix.storage }} image
             chmod 777 /output/
       - name: Pack

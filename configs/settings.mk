@@ -1,5 +1,7 @@
 # Debian release to build the rootfs from (trixie = Debian 13 stable, override with e.g. DEBIAN_SUITE=sid)
 DEBIAN_SUITE ?= trixie
+# mirror used to bootstrap the rootfs (the sources.list of the final image always points to deb.debian.org)
+DEBIAN_MIRROR ?= http://deb.debian.org/debian/
 KERNELREV="3"
 FSBLVERSION=1.0.0
 # chip passed to the OpenSBI cvitek suspend platform (all supported boards are cv181x family)
