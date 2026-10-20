@@ -54,6 +54,36 @@ fi
 
 
 
+# Grow the root partition and its ext4 filesystem to fill the storage. Used on the first boot, works for SD cards and
+# eMMC, MBR and GPT, and does nothing when the partition already fills the disk.
+# The root device is looked up by its major:minor, because / is mounted from "/dev/root", which has no device node.
+cat > /usr/local/sbin/grow-rootfs <<'XEOF'
+#!/bin/sh
+MNT=${1:-/}
+fstype=$(findmnt -no FSTYPE "$MNT") || exit 0
+[ "$fstype" = ext4 ] || exit 0
+majmin=$(findmnt -no MAJ:MIN "$MNT" | tr -d " ")
+sys=$(readlink -f "/sys/dev/block/$majmin")
+if [ ! -r "$sys/partition" ]; then
+    echo "the root filesystem is not on a partition, nothing to do"
+    exit 0
+fi
+partnum=$(cat "$sys/partition")
+part=/dev/$(basename "$sys")
+diskname=$(basename "$(dirname "$sys")")
+disk=/dev/$diskname
+end=$(( $(cat "$sys/start") + $(cat "$sys/size") ))
+total=$(cat "/sys/block/$diskname/size")
+if [ $((total - end)) -gt 4096 ]; then
+    # parted asks for a confirmation to resize a partition that is in use, and -s answers that with No
+    parted -s -f "$disk" resizepart "$partnum" 100% ||
+        echo Yes | parted ---pretend-input-tty "$disk" resizepart "$partnum" 100% || true
+    udevadm settle 2>/dev/null || true
+fi
+resize2fs "$part"
+XEOF
+chmod 755 /usr/local/sbin/grow-rootfs
+
 #regenerate SSH keys on first boot
 cat > /etc/systemd/system/finalize-image.service <<EOF
 [Unit]
@@ -62,8 +92,7 @@ Before=ssh.service
 
 [Service]
 Type=oneshot
-ExecStartPre=-/usr/sbin/parted -s -f /dev/mmcblk0 resizepart 2 100%
-ExecStartPre=-/usr/sbin/resize2fs /dev/mmcblk0p2
+ExecStartPre=-/usr/local/sbin/grow-rootfs
 ExecStartPre=-/bin/dd if=/dev/hwrng of=/dev/urandom count=1 bs=4096
 ExecStartPre=-/bin/sh -c "/bin/rm -f -v /etc/ssh/ssh_host_*_key*"
 ExecStart=/usr/bin/ssh-keygen -A -v
@@ -72,10 +101,6 @@ ExecStartPost=/bin/systemctl disable finalize-image
 [Install]
 WantedBy=multi-user.target
 EOF
-
-if [ "$STORAGETYPE" = "emmc" ]; then
-sed -i -e 's|ExecStartPre=-/usr/sbin/parted -s -f /dev/mmcblk0 resizepart 2 100%|ExecStartPre=-/usr/sbin/parted -s -f /dev/mmcblk0 resizepart 1 100%|' /etc/systemd/system/finalize-image.service
-fi
 
 cat /etc/systemd/system/finalize-image.service
 
