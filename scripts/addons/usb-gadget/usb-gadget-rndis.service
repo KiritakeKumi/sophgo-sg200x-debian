@@ -8,7 +8,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c "/bin/echo device > /proc/cviusb/otg_role"
+ExecStart=-/bin/bash -c "/bin/echo device > /proc/cviusb/otg_role"
 ExecStart=sh /usr/sbin/run_usb.sh probe rndis
 ExecStart=sh /usr/sbin/run_usb.sh start
 

@@ -28,6 +28,15 @@ NATIVE_RISCV64 := $(filter riscv64,$(shell uname -m))
 
 CROSS ?= /host-tools/gcc/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-
 
+# Kernel flavour: "vendor" is the Sophgo 5.10 BSP kernel, "mainline" is upstream Linux with the Sophgo patches in
+# configs/common/patches/linux-mainline. Select it with KERNEL=mainline. The mainline kernel is built with the
+# distribution cross compiler, not with the (vendor only) toolchain above.
+KERNEL ?= vendor
+ifeq ($(filter $(KERNEL),vendor mainline),)
+$(error $(red)KERNEL must be vendor or mainline$(reset))
+endif
+MAINLINE_CROSS ?= $(if $(NATIVE_RISCV64),,riscv64-linux-gnu-)
+
 # CHIP selects the device trees; the fsbl source tree is organised per SoC family instead
 FSBL_CHIP ?= $(CHIP)
 
@@ -39,6 +48,7 @@ _PACKAGES = $(patsubst "%,%,$(patsubst %",%,$(PACKAGES)))
 
 $(info $(blue)Board: $(BOARD)$(reset))
 $(info $(blue)Debian Suite: $(DEBIAN_SUITE)$(reset))
+$(info $(blue)Kernel: $(KERNEL)$(reset))
 $(info $(blue)Storage: $(STORAGE_TYPE)$(reset))
 $(info $(blue)Image Addons: $(IMAGE_ADDITIONS)$(reset))
 $(info $(blue)Packages: $(_PACKAGES)$(reset))
@@ -56,6 +66,14 @@ OPENSBI_REPO := https://github.com/sophgo/opensbi.git
 OPENSBI_COMMIT := 6766e9cc96df51cde91540f9a15f291bf843b682
 FSBL_REPO := https://github.com/sophgo/fsbl.git
 FSBL_COMMIT := 952dcb6903efc7b5d266bc9d51dc3a2ab54022eb
+# mainline kernel (v7.3) and the out of tree AIC8800 WiFi driver that is built into it
+MAINLINE_REPO := https://github.com/torvalds/linux.git
+MAINLINE_COMMIT := c03c1a14507dfaf8b856c2608f9ac216021fc222
+MAINLINE_VERSION := 7.3.0
+MAINLINE_REV ?= 1
+AIC8800_REPO := https://github.com/queenkjuul/aic8800-milkv-duos.git
+AIC8800_COMMIT := ccf8fd059f70384fae4878c1048603510c2df700
+AIC8800_FW_DIR := /lib/firmware/aic8800_sdio/aic8800
 
 define git_checkout
 	rm -rf $(2) && mkdir -p $(2) && cd $(2) && git init -q && git remote add origin $(1) && git fetch -q --depth 1 origin $(3) && git checkout -q FETCH_HEAD
@@ -94,12 +112,65 @@ $(BUILDDIR)/linux-compile-stamp: $(BUILDDIR)/linux-prepare-configure-stamp
 	@cp $(BUILDDIR)/*.deb /output/
 	@touch $@
 
-linux: $(BUILDDIR)/linux-compile-stamp
+ifeq ($(KERNEL),mainline)
+LINUX_STAMP := $(BUILDDIR)/linux-mainline-compile-stamp
+else
+LINUX_STAMP := $(BUILDDIR)/linux-compile-stamp
+endif
+
+linux: $(LINUX_STAMP)
 
 linux-clean:
-	@rm -rf $(BUILDDIR)/kernel
+	@rm -rf $(BUILDDIR)/kernel $(MAINLINE_DIR)
 	@rm -f $(BUILDDIR)/linux-*-stamp
 	@rm -f $(BUILDDIR)/linux-*.deb
+
+
+# Mainline kernel. Everything in here lives in its own directory, so that the packages of the two flavours cannot
+# end up mixed. Unlike the vendor kernel, a patch that does not apply stops the build.
+MAINLINE_DIR := $(BUILDDIR)/mainline
+MAINLINE_SRC := $(MAINLINE_DIR)/kernel
+MAINLINE_APPLY = cd $(MAINLINE_SRC) && $(foreach file,$(sort $(1)),git apply --ignore-whitespace $(file) &&) true
+
+$(BUILDDIR)/linux-mainline-checkout-stamp:
+	@echo "$(COLOUR_GREEN)Checking out mainline Kernel for $(BOARD)$(END_COLOUR)"
+	@mkdir -p $(MAINLINE_DIR)
+	@$(call git_checkout,$(MAINLINE_REPO),$(MAINLINE_SRC),$(MAINLINE_COMMIT))
+	@touch $@
+
+$(BUILDDIR)/linux-mainline-patch-stamp: $(BUILDDIR)/linux-mainline-checkout-stamp
+	@echo "$(COLOUR_GREEN)Patching mainline Kernel for $(BOARD)$(END_COLOUR)"
+	@$(call MAINLINE_APPLY,$(wildcard /configs/common/patches/linux-mainline/*.patch))
+	@$(call MAINLINE_APPLY,$(wildcard /configs/$(BOARD)/patches/linux-mainline/*.patch))
+ifeq ($(MAINLINE_AIC8800),yes)
+	@echo "$(COLOUR_GREEN)Adding the AIC8800 WiFi driver for $(BOARD)$(END_COLOUR)"
+	@$(call git_checkout,$(AIC8800_REPO),$(MAINLINE_DIR)/aic8800,$(AIC8800_COMMIT))
+	@sh /builder/mainline-aic8800.sh $(MAINLINE_SRC) $(MAINLINE_DIR)/aic8800 /configs/common/patches/aic8800-mainline $(AIC8800_FW_DIR)
+endif
+	@touch $@
+
+$(BUILDDIR)/linux-mainline-configure-stamp: $(BUILDDIR)/linux-mainline-patch-stamp
+	@echo "$(COLOUR_GREEN)Configuring mainline Kernel for $(BOARD)$(END_COLOUR)"
+	@cp /configs/common/linux-mainline/defconfig $(MAINLINE_SRC)/arch/riscv/configs/sophgo_$(BOARD)_defconfig
+	@cd $(MAINLINE_SRC) && $(MAKE) ARCH=riscv CROSS_COMPILE="$(MAINLINE_CROSS)" sophgo_$(BOARD)_defconfig
+	@cd $(MAINLINE_SRC) && ./scripts/kconfig/merge_config.sh -m -O . .config /configs/common/linux-mainline/local.config
+ifeq ($(MAINLINE_AIC8800),yes)
+	@cd $(MAINLINE_SRC) && ./scripts/config --enable WLAN_VENDOR_AICSEMI --enable AIC8800 --set-str AIC_FW_PATH "$(AIC8800_FW_DIR)" --module CFG80211
+endif
+	@cd $(MAINLINE_SRC) && $(MAKE) ARCH=riscv CROSS_COMPILE="$(MAINLINE_CROSS)" olddefconfig
+	@# no version suffix from git, the kernel release is $(MAINLINE_VERSION)-$(BOARD)
+	@: > $(MAINLINE_SRC)/.scmversion
+	@touch $@
+
+# The kernel headers package is not built (that is what the profile does, its name has the name of the source package
+# in it), it would need the riscv64 libssl-dev.
+$(BUILDDIR)/linux-mainline-compile-stamp: $(BUILDDIR)/linux-mainline-configure-stamp
+	@echo "$(COLOUR_GREEN)Building mainline Kernel for $(BOARD)$(END_COLOUR)"
+	@cd $(MAINLINE_SRC) && DEB_BUILD_PROFILES=pkg.linux-mainline-$(BOARD).nokernelheaders ARCH=riscv CROSS_COMPILE="$(MAINLINE_CROSS)" LOCALVERSION=-$(BOARD) KDEB_PKGVERSION=$(MAINLINE_VERSION)-$(MAINLINE_REV) KDEB_SOURCENAME=linux-mainline-$(BOARD) $(MAKE) -j$(NPROCS) bindeb-pkg
+	@cp $(MAINLINE_DIR)/linux-image-$(MAINLINE_VERSION)-$(BOARD)_*.deb $(MAINLINE_DIR)/linux-libc-dev_$(MAINLINE_VERSION)-*.deb /output/
+	@touch $@
+
+linux-mainline: $(BUILDDIR)/linux-mainline-compile-stamp
 
 
 $(BUILDDIR)/uboot-prepare-checkout-stamp:
@@ -112,6 +183,7 @@ $(BUILDDIR)/uboot-prepare-patch-stamp: $(BUILDDIR)/uboot-prepare-checkout-stamp
 	@echo "$(COLOUR_GREEN)Patching U-Boot for $(BOARD)$(END_COLOUR)"
 	@$(foreach file, $(wildcard /configs/common/patches/u-boot/*.patch), cd $(BUILDDIR)/u-boot && git apply --ignore-whitespace $(file);)
 	@$(foreach file, $(wildcard /configs/$(BOARD)/patches/u-boot/*.patch), cd $(BUILDDIR)/u-boot && git apply --ignore-whitespace $(file);)
+	@$(if $(filter mainline,$(KERNEL)),$(foreach file, $(sort $(wildcard /configs/common/patches/u-boot-mainline/*.patch)), cd $(BUILDDIR)/u-boot && git apply --ignore-whitespace $(file);))
 	@cp /configs/$(BOARD)/u-boot/defconfig $(BUILDDIR)/u-boot/configs/$(BOARD)_defconfig
 	@$(foreach file, $(wildcard /configs/common/dts/$(CHIP)/*), cp $(file) $(BUILDDIR)/u-boot/arch/riscv/dts/;)
 	@$(foreach file, $(wildcard /configs/common/dts/$(CHIP)_$(ARCH)/*), cp $(file) $(BUILDDIR)/u-boot/arch/riscv/dts/;)
@@ -230,22 +302,32 @@ $(BUILDDIR)/image-prepare-stamp:
 		$(DEBIAN_SUITE) "/rootfs/" "deb $(DEBIAN_MIRROR) $(DEBIAN_SUITE) main" "deb [signed-by=/etc/apt/keyrings/sophgo.asc] https://sophgo.my-ho.st:8443/ debian sophgo"
 	@touch $@
 
-$(BUILDDIR)/image-addons-stamp: $(BUILDDIR)/image-prepare-stamp $(BUILDDIR)/fsbl-package-stamp $(BUILDDIR)/linux-compile-stamp $(addon-targets)
+$(BUILDDIR)/image-addons-stamp: $(BUILDDIR)/image-prepare-stamp $(BUILDDIR)/fsbl-package-stamp $(LINUX_STAMP) $(addon-targets)
 	@echo "$(COLOUR_GREEN)Copying Deb files for installation on $(BOARD)$(END_COLOUR)"
 	@cp /output/cvitek-fsbl-$(BOARD)-*.deb /rootfs/tmp/install/ 
+ifeq ($(KERNEL),mainline)
+	@cp /output/linux-image-$(MAINLINE_VERSION)-$(BOARD)_*.deb /rootfs/tmp/install/
+	@cp /output/linux-libc-dev_$(MAINLINE_VERSION)-*.deb /rootfs/tmp/install/
+else
 	@cp /output/linux-image-$(BOARD)-*.deb /rootfs/tmp/install/
 	@cp /output/linux-headers-*.deb /rootfs/tmp/install/
-	@cp /output/linux-libc-dev*.deb /rootfs/tmp/install/
+	@cp /output/linux-libc-dev_5.10*.deb /rootfs/tmp/install/
+endif
 	@touch $@
 
 
-$(BUILDDIR)/image-customize-stamp: $(BUILDDIR)/image-addons-stamp $(BUILDDIR)/linux-compile-stamp $(BUILDDIR)/fsbl-package-stamp
+$(BUILDDIR)/image-customize-stamp: $(BUILDDIR)/image-addons-stamp $(LINUX_STAMP) $(BUILDDIR)/fsbl-package-stamp
 	@echo "$(COLOUR_GREEN)Customizing Image for $(BOARD)$(END_COLOUR)"
 	@mkdir -p /rootfs/tmp/install/
 	@echo $(BOARD) > /rootfs/tmp/install/hostname
 	@echo $(BOARD) > /rootfs/tmp/install/board
 	@echo $(STORAGE_TYPE) > /rootfs/tmp/install/storage
 	@echo $(DEBIAN_SUITE) > /rootfs/tmp/install/suite
+	@echo $(KERNEL) > /rootfs/tmp/install/kernel
+ifeq ($(KERNEL),mainline)
+	@echo $(MAINLINE_DTB) > /rootfs/tmp/install/dtb
+	@echo $(MAINLINE_AIC8800) > /rootfs/tmp/install/aic8800
+endif
 	@$(if $(NATIVE_RISCV64),,cp -v /usr/bin/qemu-riscv64-static /rootfs/tmp/install/)
 	@cp -v /builder/setup_rootfs.sh /rootfs/tmp/install/
 	@cp -v $(BUILDDIR)/public-key.asc /rootfs/tmp/install/
@@ -289,4 +371,4 @@ image-clean-customize:
 
 clean: opensbi-clean uboot-clean linux-clean fsbl-clean
 
-.PHONY: image clean opensbi uboot linux fsbl fsbl-clean uboot-clean linux-clean opensbi-clean
+.PHONY: image clean opensbi uboot linux linux-mainline fsbl fsbl-clean uboot-clean linux-clean opensbi-clean

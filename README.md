@@ -5,6 +5,9 @@ This repository builds Debian 13 (trixie) images for Sophgo cv181x/sg200x based 
 
 The images aim to be as close to possible to debian best practices as possible
 
+The images use the Sophgo vendor 5.10 kernel by default. There is also an experimental image with a recent mainline
+Linux kernel, see [Kernels](#kernels).
+
 ## Flashing the Image
 
 ### Duo256, DuoS, and LicheeRVNano
@@ -37,6 +40,39 @@ Logins: root/rv and debian/rv
 
 (root login is disabled via SSH, login via debian, and SU to root if needed)
 
+On the first boot the root partition and its filesystem are grown to fill the SD card or the eMMC, and the SSH host keys are generated.
+
+### Kernels
+| | vendor (default) | mainline (experimental) |
+|---|---|---|
+| Kernel | Sophgo 5.10 BSP kernel | Linux 7.3 plus the Sophgo patches |
+| Build with | `make BOARD=... image` | `make BOARD=... KERNEL=mainline image` |
+| Compiler | the toolchain of the Sophgo SDK (x86_64 only) | Debian's `riscv64-linux-gnu` cross compiler, or the native one |
+| Tested on hardware | yes | **no, not yet** |
+
+The mainline kernel is built from the upstream kernel sources, with the patches in `configs/common/patches/linux-mainline`.
+They are the Sophgo SG200x patch series of [Armbian](https://github.com/armbian/build) (which collects the work of
+queenkjuul, Lukasz Sobala and others, most of it is on its way to the mainline kernel) and a few changes of our own.
+The AIC8800 WiFi/Bluetooth driver is not in the mainline kernel, it is built into the kernel from
+[queenkjuul/aic8800-milkv-duos](https://github.com/queenkjuul/aic8800-milkv-duos) with the build fixes from Armbian.
+
+What works on the mainline kernel is what the patches and the device trees cover:
+
+| | Duo S | Duo 256M | LicheeRV Nano |
+|---|---|---|---|
+| SD card / eMMC | yes / yes | yes / - | yes / - |
+| Ethernet | yes | no hardware | yes (untested) |
+| WiFi and Bluetooth | yes | no hardware | **no** |
+| USB-C as a USB network adapter | yes | yes | yes |
+| USB Type-A host port | no, see the note below | no hardware | no hardware |
+
+* The USB port is a single controller that can either be a device (the board shows up as a network adapter, this is the
+  default) or a host (the Type-A port of the Duo S), but not both. The mode is fixed by the device tree.
+* The vendor-only features (camera, display, TPU) are not available on the mainline kernel.
+* The `linux-headers` package is not built for the mainline kernel.
+* The `u-boot` environment of the mainline images loads the device tree at a higher address than the vendor ones,
+  because the mainline kernel is larger (`configs/common/patches/u-boot-mainline`).
+
 ### USB Gadget Support
 by default, a rndis interface is started on the USB port, and the IP address is
 10.42.0.1 - It also starts a DHCP Server on that interface, so your PC should automatically get an IP address in the 10.42.0.x range
@@ -63,7 +99,7 @@ systemctl enable usb-switch
 and reboot afterwards. 
 
 ### Wifi on DuoS/LicheeRVNano
-For the LicheeRVNano/DuoS board, Wifi is enabled. To connect to your wifi network, execute the following command and select "Activate a connection" and select your wifi network:
+For the LicheeRVNano/DuoS board, Wifi is enabled (with the mainline kernel only on the DuoS, see [Kernels](#kernels)). To connect to your wifi network, execute the following command and select "Activate a connection" and select your wifi network:
 ```
 nmtui
 ```
@@ -73,7 +109,7 @@ For Boards with eithernet, they should automatically get a IP address if your ne
 ethernet port in nmtui
 
 ### Camera/ISP/Panel Support
-The images are based on the vendor 5.10 kernel, but exclude the following drivers:
+The images with the vendor 5.10 kernel exclude the following drivers:
 - mipi-rx/csi drivers
 - mipi-tx/dsi drivers
 - TPU Drivers
@@ -109,11 +145,28 @@ podman run --privileged -it --rm -v ./configs/:/configs -v ./image:/output ghcr.
 
 The Docker image will build the image and place it in the image directory
 
+To build the image with the experimental mainline kernel, add "KERNEL=mainline" to the make command:
+```
+podman run --privileged -it --rm -v ./configs/:/configs -v ./image:/output ghcr.io/fishwaldo/sophgo-sg200x-debian:master make BOARD=duos KERNEL=mainline image
+```
+
 addition make targets are available when building:
 - image - builds the image
 - clean - cleans the build directory
-- linux - build a kernel debian package
+- linux - build a kernel debian package (of the kernel selected with KERNEL)
+- linux-mainline - build the mainline kernel debian package
 - fsbl - build the fsbl debain package (that includes cvitek-fsbl, opensbi and u-boot)
+
+Some variables can be changed on the make command line:
+- BOARD, STORAGE_TYPE (sd or emmc) and KERNEL (vendor or mainline), as described above
+- DEBIAN_SUITE - the Debian release of the root filesystem, the default is trixie (Debian 13). The vendor kernel needs
+  a systemd that still works with a 5.10 kernel: the one of Debian 13 does, but the one in sid (260 and newer) does not.
+- DEBIAN_MIRROR - the mirror used to create the root filesystem, the default is http://deb.debian.org/debian/
+- CROSS - the prefix of the cross compiler of the vendor kernel, u-boot, opensbi and fsbl. When building on a riscv64
+  machine, "CROSS=" (empty) builds with the compiler of the system. The vendor kernel needs the toolchain of the SDK, though.
+
+The sources of the kernel, u-boot, opensbi and fsbl are fetched from GitHub by the exact commit that is pinned at the top of
+scripts/Makefile.
 
 ## Customizing the Image
 The configs directory contains patches, configuration and device tree files that are used to build the image.
@@ -123,6 +176,10 @@ The configs/common directory contains the common configuration for all boards, a
 To add packages to the image, either add the package name in PACKAGES variable of configs/settings.mk or if the packae is specific to a board, add it to the configs/\<board\>/settings.mk file
 
 Patches for the kernel, opensbi, u-boot or fsbl can be placed in configs/common/patches/ or configs/\<board\>/patches/ depending what they are for.
+The patches of the mainline kernel are in the linux-mainline directories there (configs/common/patches/linux-mainline), the
+kernel configuration is configs/common/linux-mainline/defconfig and local.config (the changes on top of it), the patches that are
+only applied to u-boot when building with the mainline kernel are in u-boot-mainline, and the build fixes for the AIC8800
+driver in aic8800-mainline. The device tree of the mainline kernel to boot is MAINLINE_DTB in the settings of the board.
 
 To assist with developing the image, you can get a shell in the docker container by running:
 ```
@@ -131,7 +188,7 @@ docker run --privileged -it --rm -v ./configs/:/configs -v ./image:/output -v ./
 inside the container, packages are build in the /builder/ directory, and the rootfs is placed at /rootfs/ directory
 
 # TODO
-- DeviceTree Overlay Support
+- DeviceTree Overlay Support (the mainline kernel already builds the overlays of its device trees, but u-boot does not apply them yet)
 - Add support for the MIPI-CSI/DSI drivers (Sample applications would be in the sophgo-sg200x-packages repository if they do not depend upon a musl libc version)
 - Add support for the TPU drivers
-- Possibly mainline kernel support via the sophgo linux for-next repositories
+- Test the mainline kernel on all the boards, and make it the default when it is as good as the vendor kernel

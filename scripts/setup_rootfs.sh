@@ -6,6 +6,8 @@ BOARD=$(cat /tmp/install/board)
 HOSTNAME=$(cat /tmp/install/hostname)
 STORAGETYPE=$(cat /tmp/install/storage)
 SUITE=$(cat /tmp/install/suite)
+# vendor: the Sophgo 5.10 kernel, mainline: upstream Linux (the files do not exist in older builds)
+KERNEL=$(cat /tmp/install/kernel 2>/dev/null || echo vendor)
 
 
 export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true
@@ -125,30 +127,62 @@ kernel_image=${lib_dir##*/}
 # set default dtb file, please verify your board version
 mkdir -p /boot/fdt/${kernel_image}
 
-cp ${lib_dir}/cvitek/*.dtb /boot/fdt/${kernel_image}/
+if [ "$KERNEL" = "mainline" ]; then
+  # the dtbs and overlays are in the sophgo directory, keep it, the dtb to use is selected with U_BOOT_FDT below
+  cp -a ${lib_dir}/sophgo /boot/fdt/${kernel_image}/
+  MAINLINE_DTB=$(cat /tmp/install/dtb)
+  test -f /boot/fdt/${kernel_image}/${MAINLINE_DTB}
+  FDT_DIR_NAME="linux-image-"
+else
+  cp ${lib_dir}/cvitek/*.dtb /boot/fdt/${kernel_image}/
+  FDT_DIR_NAME="linux-image-$BOARD-"
+fi
 
 
 cat /boot/extlinux/extlinux.conf
 
 if [ "$STORAGETYPE" = "sd" ]; then
-sed -i -i 's|#U_BOOT_PARAMETERS=".*"|U_BOOT_PARAMETERS="console=ttyS0,115200 earlycon=sbi root=/dev/mmcblk0p2 rootwait rw"|' /etc/default/u-boot
+  ROOT_DEVICE=/dev/mmcblk0p2
+elif [ "$KERNEL" = "mainline" ]; then
+  # the eMMC of the Duo S is mmc1 in the mainline device tree, mmc0 is the SD card slot
+  ROOT_DEVICE=/dev/mmcblk1p1
 else
-sed -i -i 's|#U_BOOT_PARAMETERS=".*"|U_BOOT_PARAMETERS="console=ttyS0,115200 earlycon=sbi root=/dev/mmcblk0p1 rootwait rw"|' /etc/default/u-boot
+  ROOT_DEVICE=/dev/mmcblk0p1
 fi
+sed -i -i "s|#U_BOOT_PARAMETERS=\".*\"|U_BOOT_PARAMETERS=\"console=ttyS0,115200 earlycon=sbi root=$ROOT_DEVICE rootwait rw\"|" /etc/default/u-boot
 
 sed -i -e 's|#U_BOOT_SYNC_DTBS=".*"|U_BOOT_SYNC_DTBS="true"|' /etc/default/u-boot
 #doing this dance, as in the chroot, / and /boot are same filesystem, so u-boot-update doesn't setup correctly
-echo "U_BOOT_FDT_DIR=\"/usr/lib/linux-image-$BOARD-\"" >> /etc/default/u-boot
+echo "U_BOOT_FDT_DIR=\"/usr/lib/$FDT_DIR_NAME\"" >> /etc/default/u-boot
+if [ "$KERNEL" = "mainline" ]; then
+  # one specific device tree of the package, the U-Boot environment of the vendor bootloader would look for another name
+  echo "U_BOOT_FDT=\"$MAINLINE_DTB\"" >> /etc/default/u-boot
+fi
 u-boot-update
+# "fdtdir" is used by the vendor kernel, "fdt" by the mainline kernel
 if [ "$STORAGETYPE" = "sd" ]; then
-  sed -i -e 's|fdtdir /usr/lib/|fdtdir /fdt/|' /boot/extlinux/extlinux.conf
+  sed -i -E 's#^([[:space:]]*fdt(dir)? )/usr/lib/#\1/fdt/#' /boot/extlinux/extlinux.conf
   sed -i -e 's|linux /boot/|linux /|' /boot/extlinux/extlinux.conf
-  sed -i -e "s|U_BOOT_FDT_DIR=\".*\"|U_BOOT_FDT_DIR=\"/fdt/linux-image-$BOARD-\"|" /etc/default/u-boot
+  sed -i -e "s|U_BOOT_FDT_DIR=\".*\"|U_BOOT_FDT_DIR=\"/fdt/$FDT_DIR_NAME\"|" /etc/default/u-boot
 else 
-  sed -i -e 's|fdtdir /usr/lib/|fdtdir /boot/fdt/|' /boot/extlinux/extlinux.conf
+  sed -i -E 's#^([[:space:]]*fdt(dir)? )/usr/lib/#\1/boot/fdt/#' /boot/extlinux/extlinux.conf
 fi
 
 cat /boot/extlinux/extlinux.conf
+
+# The mainline kernel has the AIC8800 drivers as modules, nothing loads them by itself
+if [ "$KERNEL" = "mainline" ] && [ "$(cat /tmp/install/aic8800 2>/dev/null)" = "yes" ]; then
+  mkdir -p /etc/modprobe.d /etc/modules-load.d
+  cat > /etc/modprobe.d/aic8800.conf <<EOF
+# aic8800_bsp powers the chip and uploads its firmware, the wifi and bluetooth drivers are useless before it has run
+softdep aic8800_fdrv pre: aic8800_bsp
+softdep aic8800_btlpm pre: aic8800_bsp
+EOF
+  cat > /etc/modules-load.d/aic8800.conf <<EOF
+aic8800_bsp
+aic8800_fdrv
+EOF
+fi
 
 # Set hostname
 cat /tmp/install/hostname > /etc/hostname

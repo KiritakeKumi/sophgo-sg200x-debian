@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kiritake Kumi <root@niconiconi.us>
+Date: Tue, 20 Oct 2026 10:40:35 +0800
+Subject: [PATCH] riscv: dts: sophgo: put the Milk-V Duo 256M USB port in
+ device mode
+
+The board has a single Type-C port and no VBUS switch. In host mode nothing can
+be plugged into it, while in device mode the board shows up as a USB network
+adapter when connected to a computer, which is how the Debian image is reached
+without a serial cable.
+
+diff --git a/arch/riscv/boot/dts/sophgo/sg2002-milkv-duo256m.dts b/arch/riscv/boot/dts/sophgo/sg2002-milkv-duo256m.dts
+index a2797c0bd..b89cde7c0 100644
+--- a/arch/riscv/boot/dts/sophgo/sg2002-milkv-duo256m.dts
++++ b/arch/riscv/boot/dts/sophgo/sg2002-milkv-duo256m.dts
+@@ -116,6 +116,6 @@ &uart0 {
+ };
+ 
+ &usb {
+-	dr_mode = "host";
++	dr_mode = "peripheral";
+ 	status = "okay";
+ };
+-- 
+-
+
