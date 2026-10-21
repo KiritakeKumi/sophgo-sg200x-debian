@@ -114,6 +114,11 @@ fi
 sed -i -e 's|#U_BOOT_SYNC_DTBS=".*"|U_BOOT_SYNC_DTBS="true"|' /etc/default/u-boot
 #doing this dance, as in the chroot, / and /boot are same filesystem, so u-boot-update doesn't setup correctly
 echo "U_BOOT_FDT_DIR=\"/usr/lib/linux-image-$BOARD-\"" >> /etc/default/u-boot
+# boot the default entry automatically: prompt 0 makes the extlinux menu
+# non-interactive (the timeout still applies), reachable only by interrupting
+# u-boot itself with a key during its bootdelay
+sed -i -e 's|#U_BOOT_PROMPT="1"|U_BOOT_PROMPT="0"|' /etc/default/u-boot
+sed -i -e 's|#U_BOOT_TIMEOUT="50"|U_BOOT_TIMEOUT="10"|' /etc/default/u-boot
 u-boot-update
 if [ "$STORAGETYPE" = "sd" ]; then
   sed -i -e 's|fdtdir /usr/lib/|fdtdir /fdt/|' /boot/extlinux/extlinux.conf
