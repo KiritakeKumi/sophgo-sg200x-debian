@@ -158,6 +158,11 @@ if [ "$KERNEL" = "mainline" ]; then
   # one specific device tree of the package, the U-Boot environment of the vendor bootloader would look for another name
   echo "U_BOOT_FDT=\"$MAINLINE_DTB\"" >> /etc/default/u-boot
 fi
+# boot the default entry automatically: prompt 0 makes the extlinux menu
+# non-interactive (the timeout still applies), reachable only by interrupting
+# u-boot itself with a key during its bootdelay
+sed -i -e 's|#U_BOOT_PROMPT="1"|U_BOOT_PROMPT="0"|' /etc/default/u-boot
+sed -i -e 's|#U_BOOT_TIMEOUT="50"|U_BOOT_TIMEOUT="10"|' /etc/default/u-boot
 u-boot-update
 # "fdtdir" is used by the vendor kernel, "fdt" by the mainline kernel
 if [ "$STORAGETYPE" = "sd" ]; then
