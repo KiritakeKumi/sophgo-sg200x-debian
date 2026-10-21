@@ -1,17 +1,22 @@
 #!/bin/sh
 # Add the AIC8800 SDIO WiFi/Bluetooth driver to a mainline kernel tree, as in-tree modules.
 #
-# usage: mainline-aic8800.sh <kernel tree> <driver checkout> <patch dir> <firmware dir>
+# usage: mainline-aic8800.sh <kernel tree> <driver checkout> <patch dir> <firmware dir> [board]
 #
 # The driver is the queenkjuul/aic8800-milkv-duos fork of the Milk-V vendor driver. It does not build on
 # recent kernels by itself, the patches in <patch dir> (from Armbian) fix that. Copying it into the
 # kernel tree is cheaper than DKMS under emulation and needs no headers package on the board.
+#
+# <board> selects the power-up flow of the CVITEK platform in the driver: the default is the
+# Milk-V Duo S (its WiFi regulator GPIOs), licheervnano skips all GPIO handling because u-boot
+# has already powered the chip and muxed the SD1 pads.
 set -e
 
 KERNEL=$1
 DRIVER=$2
 PATCHES=$3
 FWDIR=$4
+BOARD=$5
 
 WIRELESS=$KERNEL/drivers/net/wireless
 DEST=$WIRELESS/aicsemi
@@ -32,6 +37,16 @@ grep -qF "CONFIG_AIC_FW_PATH = \"$FWDIR\"" "$DEST/aic8800/aic8800_bsp/Makefile" 
 	echo "could not set the firmware path in the AIC8800 Makefile" >&2
 	exit 1
 }
+
+# the board of the CVITEK platform (power-up GPIOs or none), empty keeps the driver default
+if [ -n "$BOARD" ]; then
+	sed -i "s|^ccflags-\$(CONFIG_PLATFORM_CVITEK) += -DWLAN_BOARD_\$(WLAN_BOARD)|ccflags-\$(CONFIG_PLATFORM_CVITEK) += -DWLAN_BOARD_${BOARD}|" \
+		"$DEST/aic8800/aic8800_bsp/Makefile"
+	grep -qF -- "-DWLAN_BOARD_${BOARD}" "$DEST/aic8800/aic8800_bsp/Makefile" || {
+		echo "could not set the AIC8800 board to ${BOARD}" >&2
+		exit 1
+	}
+fi
 
 # hook the driver into the wireless Kconfig and Makefile
 if ! grep -q 'aicsemi/Kconfig' "$WIRELESS/Kconfig"; then

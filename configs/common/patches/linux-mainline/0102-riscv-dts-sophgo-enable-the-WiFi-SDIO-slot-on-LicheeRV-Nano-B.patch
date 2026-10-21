@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kiritake Kumi <root@niconiconi.us>
+Date: Thu, 22 Oct 2026 02:30:00 +0800
+Subject: [PATCH] riscv: dts: sophgo: enable the WiFi SDIO slot on LicheeRV
+ Nano B
+
+The WiFi chip of the board (a plain AIC8800, revision U03) sits on the
+second SDHCI controller, SD1. The vendor u-boot already powers the chip
+(GPIOA26 pulse, kept high) and muxes the SD1 pads before the kernel
+starts, so the controller only needs to be enabled: no mmc-pwrseq and no
+pin config here, the pads come out of reset in the SD1 function.
+
+The frequency stays at 25 MHz like in the vendor device tree, whose
+wifi-sd node runs the slot at 25 MHz even though the driver asks for 50.
+
+diff --git a/arch/riscv/boot/dts/sophgo/sg2002-licheerv-nano-b.dts b/arch/riscv/boot/dts/sophgo/sg2002-licheerv-nano-b.dts
+index 5f7c2160a..8b9d3f1c2 100644
+--- a/arch/riscv/boot/dts/sophgo/sg2002-licheerv-nano-b.dts
++++ b/arch/riscv/boot/dts/sophgo/sg2002-licheerv-nano-b.dts
+@@ -94,10 +94,23 @@ &uart0 {
+ 	status = "okay";
+ };
+ 
++&sdhci1 {
++	bus-width = <4>;
++	cap-sdio-irq;
++	cap-sd-highspeed;
++	keep-power-in-suspend;
++	no-1-8-v;
++	no-mmc;
++	no-sd;
++	non-removable;
++	max-frequency = <25000000>;
++	status = "okay";
++};
++
+ &gmac0 {
+ 	status = "okay";
+ };
+ 
+ &mdio {
+ 	status = "okay";
+ };

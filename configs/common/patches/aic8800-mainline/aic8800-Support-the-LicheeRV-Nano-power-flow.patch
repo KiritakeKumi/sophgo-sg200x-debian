@@ -1,0 +1,108 @@
+From: Kiritake Kumi <root@niconiconi.us>
+Subject: [PATCH] aic8800: support the LicheeRV Nano power flow
+
+The CONFIG_PLATFORM_CVITEK power-on of the driver is written for the Milk-V
+Duo S: it claims XGPIOA15 (the WiFi regulator GPIO of that board) and pokes
+XGPIOE7 through the RTC IO bank. On the LicheeRV Nano none of that applies:
+XGPIOA15 is the SD card power enable, and its WiFi chip (a plain AIC8800) is
+already powered by u-boot, which pulses GPIOA26 and muxes the SD1 pads
+before the kernel starts.
+
+Add a board selection to the CVITEK platform: on the LicheeRV Nano
+(WLAN_BOARD=licheervnano) no GPIO is touched at all, leaving only the SDIO
+rescan of the 4320000.mmc host, which is what brings the already-powered
+chip up. The default stays the Duo S behaviour.
+
+---
+diff --git a/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/Makefile b/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/Makefile
+index 52d4c10..1990dc6 100644
+--- a/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/Makefile
++++ b/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/Makefile
+@@ -73,6 +73,11 @@ CONFIG_PLATFORM_AMLOGIC ?= n
+ CONFIG_PLATFORM_UBUNTU ?= n
+ CONFIG_PLATFORM_CVITEK ?= y
+ 
++# Board of the CVITEK platform. The default is the Milk-V Duo S, whose WiFi
++# regulator hangs off XGPIOA15/XGPIOE7. licheervnano: the chip is powered by
++# the bootloader already, no GPIO is touched.
++ccflags-$(CONFIG_PLATFORM_CVITEK) += -DWLAN_BOARD_$(WLAN_BOARD)
++
+ ifeq ($(CONFIG_PLATFORM_ROCKCHIP), y)
+ ccflags-$(CONFIG_PLATFORM_ROCKCHIP) += -DCONFIG_PLATFORM_ROCKCHIP
+ KDIR ?= /home/yaya/E/Rockchip/3566/firefly/Android11.0/Firefly-RK356X_Android11.0_git_20210824/RK356X_Android11.0/kernel
+diff --git a/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/aicsdio.c b/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/aicsdio.c
+index 517bdd0..07be978 100644
+--- a/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/aicsdio.c
++++ b/drivers/net/wireless/aicsemi/aic8800/aic8800_bsp/aicsdio.c
+@@ -56,8 +56,17 @@ static int cvi_wifi_power_gpio = -1;
+ #define DW_GPIO_DDR  0x04 // Direction Register
+ 
+ /* AIC8800 Pins */
++#if defined(WLAN_BOARD_licheervnano)
++/* The LicheeRV Nano chip is powered by u-boot (GPIOA26 pulse, held high);
++ * XGPIOA15 is the SD card power enable there and must not be claimed, and
++ * the RTC IO bank pin is unconnected. Skip both, only the SDIO rescan
++ * remains. */
++#define WIFI_PWR_PIN (-1)
++#define AICBSP_NO_RTC_EN 1
++#else
+ #define WIFI_PWR_PIN 15 // XGPIOA[15]
+ #define WIFI_EN_PIN  7  // XGPIOE[7]
++#endif
+ 
+ /* Milk-V Duo S device labels */
+ #define XGPIOA "3020000.gpio"
+@@ -586,6 +595,7 @@ static int aicbsp_platform_power_on(void)
+ 
+ #ifdef CONFIG_PLATFORM_CVITEK
+ 	printk("aicbsp: Powering on WiFi/BT\n");
++#if WIFI_PWR_PIN >= 0
+ 	struct gpio_device *device = gpio_device_find(XGPIOA, find_gpio_base);
+ 	if (device) {
+ 		cvi_wifi_power_gpio = gpio_device_get_base(device) + WIFI_PWR_PIN;
+@@ -596,6 +606,7 @@ static int aicbsp_platform_power_on(void)
+ 			cvi_wifi_power_gpio = -1;
+ 		}
+ 	}
++#endif
+ 
+ 	if (cvi_wifi_power_gpio >= 0) {
+ 		ret = gpio_direction_output(cvi_wifi_power_gpio, 1);
+@@ -611,10 +622,12 @@ static int aicbsp_platform_power_on(void)
+ 	and thus cannot be enabled with gpio_request and related functions.
+ 	Instead, we just write directly to the relevant registers.
+ 	*/
++#ifndef AICBSP_NO_RTC_EN
+ 	if (cvi_set_pin(GPIO_PWR_BASE, WIFI_EN_PIN, true) != 0) {
+ 		pr_err("aicbsp: Failed to set up WiFi enable pin\n");
+ 		return -1;
+ 	}
++#endif
+ #endif //CONFIG_PLATFORM_CVITEK
+ 
+ 	sema_init(&aic_chipup_sem, 0);
+@@ -670,10 +683,12 @@ static int aicbsp_platform_power_on(void)
+ 		}
+ 		gpio_free(cvi_wifi_power_gpio);
+ 	}
++#ifndef AICBSP_NO_RTC_EN
+ 	if (cvi_set_pin(GPIO_PWR_BASE, WIFI_EN_PIN, false) != 0) {
+ 		pr_err("aicbsp: Failed to set up WiFi enable pin\n");
+ 		return -1;
+ 	}
++#endif
+ #endif //CONFIG_PLATFORM_CVITEK
+ 
+ 	return -1;
+@@ -712,9 +727,11 @@ static void aicbsp_platform_power_off(void)
+ 		}
+ 	}
+ 	gpio_free(cvi_wifi_power_gpio);
++#ifndef AICBSP_NO_RTC_EN
+ 	if (cvi_set_pin(GPIO_PWR_BASE, WIFI_EN_PIN, false) != 0) {
+ 		pr_err("aicbsp: Failed to tear down WiFi power pin\n");
+ 	}
++#endif
+ #endif //CONFIG_PLATFORM_CVITEK
+ 
+ 	sdio_dbg("%s\n", __func__);

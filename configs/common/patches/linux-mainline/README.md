@@ -15,9 +15,11 @@ Left out on purpose:
 - the TPU driver, the camera (media) patches and the CMA pool, because nothing in these images uses them yet
 - a change for the build with the test suite of the fortify code
 
-`0100` and `0101` are our own, they have to come after the Armbian patches that change the same device trees:
+`0100` to `0102` are our own, they have to come after the Armbian patches that change the same device trees:
 - `0100` puts the USB port of the Duo 256M in device mode (it only has a Type-C port)
 - `0101` does the same for the LicheeRV Nano B and enables its ethernet
+- `0102` enables the second SDHCI slot of the LicheeRV Nano B, which is where its AIC8800 WiFi chip sits
+  (powered and muxed by the vendor u-boot already, so no pwrseq node and no pin config in it)
 
 The Duo S gets its device mode from the `sg2000-milkv-duo-s-usb-device.dtb` variant that the Armbian patches build.
 

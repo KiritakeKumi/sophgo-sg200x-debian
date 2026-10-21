@@ -74,6 +74,9 @@ MAINLINE_REV ?= 1
 AIC8800_REPO := https://github.com/queenkjuul/aic8800-milkv-duos.git
 AIC8800_COMMIT := ccf8fd059f70384fae4878c1048603510c2df700
 AIC8800_FW_DIR := /lib/firmware/aic8800_sdio/aic8800
+# board of the AIC8800 driver power-up flow: empty is the Duo S default (its regulator GPIOs),
+# licheervnano powers the chip in u-boot already and touches no GPIO
+AIC8800_BOARD ?= $(if $(filter licheervnano,$(BOARD)),licheervnano,)
 
 define git_checkout
 	rm -rf $(2) && mkdir -p $(2) && cd $(2) && git init -q && git remote add origin $(1) && git fetch -q --depth 1 origin $(3) && git checkout -q FETCH_HEAD
@@ -145,7 +148,7 @@ $(BUILDDIR)/linux-mainline-patch-stamp: $(BUILDDIR)/linux-mainline-checkout-stam
 ifeq ($(MAINLINE_AIC8800),yes)
 	@echo "$(COLOUR_GREEN)Adding the AIC8800 WiFi driver for $(BOARD)$(END_COLOUR)"
 	@$(call git_checkout,$(AIC8800_REPO),$(MAINLINE_DIR)/aic8800,$(AIC8800_COMMIT))
-	@sh /builder/mainline-aic8800.sh $(MAINLINE_SRC) $(MAINLINE_DIR)/aic8800 /configs/common/patches/aic8800-mainline $(AIC8800_FW_DIR)
+	@sh /builder/mainline-aic8800.sh $(MAINLINE_SRC) $(MAINLINE_DIR)/aic8800 /configs/common/patches/aic8800-mainline $(AIC8800_FW_DIR) $(AIC8800_BOARD)
 endif
 	@touch $@
 

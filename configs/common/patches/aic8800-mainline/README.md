@@ -19,4 +19,9 @@ The driver reads its firmware from the directory AIC8800_FW_DIR (scripts/Makefil
 `aic8800-firmware` addon installs it. This is a build time setting, `modprobe aic8800_bsp aic_fw_path=...`
 overrides it.
 
-Only the Milk-V Duo S is supported: the power-up of the chip in the driver uses fixed GPIOs of that board.
+Boards: the power-up of the chip in the driver uses the fixed GPIOs of the Milk-V Duo S (XGPIOA15 and
+XGPIOE7 of the RTC bank). `aic8800-Support-the-LicheeRV-Nano-power-flow.patch` adds a board selection to
+that: with `WLAN_BOARD=licheervnano` (set via AIC8800_BOARD in scripts/Makefile) no GPIO is touched,
+because the vendor u-boot of the LicheeRV Nano has already powered the chip (a GPIOA26 pulse, held high)
+and muxed the SD1 pads before the kernel starts. Claiming XGPIOA15 there would switch off the SD card,
+it is the card power enable on that board.
